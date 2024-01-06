@@ -1,6 +1,7 @@
 import logging
 import functools
 import datetime
+import time
 from collections.abc import Hashable
 
 logger = logging.getLogger("schedule.log")
@@ -57,6 +58,19 @@ class scheduler:
             return None
         return (self.next_run - datetime.datetime.now()).total_seconds()
 
+    def clear(self,tag:None):
+        if tag is None:
+            logger.debug("Deleteing all jobs")
+            del self.jobs[:]
+        else:
+            logger.debug(f"Deleteing all tagged {tag}")
+            self.jobs[:] = (job for job in self.jobs if tag not in job.tags)
+
+    def run_all(self,delay_seconds=0):
+        logger.debug(f"Runnig all {len(self.jobs)} with {delay_seconds} delay in between")
+        for job in self.jobs[:]:
+            self._job_run(job)
+            time.sleep(delay_seconds)
 
 class Job:
     """ this class receives the jobs and determines the job type """
@@ -170,16 +184,13 @@ class Job:
         self.next_run = datetime.datetime.now() + self.period
 
 
-
 default_scheduler = scheduler()
 
 def every(interval):
     return default_scheduler.every(interval=interval)
 
-
 def run_pending():
     default_scheduler.run_pending()
-
 
 def get_jobs(tag=None):
     return default_scheduler.get_jobs(tag)
@@ -191,3 +202,17 @@ def get_next_run(tag=None):
 # ta job badi chand seconds moonde
 def idle_seconds():
     return default_scheduler.idle_seconds
+
+def clear(tag=None):
+    return default_scheduler.clear(tag)
+
+def run_all(delay_seconds=None):
+    return default_scheduler.run_all(delay_seconds)
+
+#decorator function
+def repeat(job,*args,**kwargs):
+    def _schedule_decorator(decorated_function):
+        job.do(decorated_function,*args,**kwargs)
+        return decorated_function
+    return _schedule_decorator
+
