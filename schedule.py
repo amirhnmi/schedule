@@ -1,7 +1,7 @@
 import logging
 import functools
 import datetime
-
+from collections.abc import Hashable
 
 logger = logging.getLogger("schedule.log")
 
@@ -37,6 +37,26 @@ class scheduler:
     def _job_run(self, job):
         job.run()
 
+    def get_jobs(self,tag=None):
+        if tag is None: return self.jobs[:]
+        return [job for job in self.jobs if tag in job.tags]
+    
+    def get_next_run(self,tag=None):
+        if not self.jobs:
+            return None
+        job_filterd = self.get_jobs(tag)
+        if not job_filterd:
+            return None
+        return min(job_filterd).next_run
+    
+
+    next_run = property(get_next_run)
+    @property
+    def idle_seconds(self):
+        if not self.next_run:
+            return None
+        return (self.next_run - datetime.datetime.now()).total_seconds()
+
 
 class Job:
     """ this class receives the jobs and determines the job type """
@@ -48,12 +68,13 @@ class Job:
         self.period = None  # مثال -> هر ۱۰ ثانیه
         self.next_run = None  # زمان بعدی اجرای جاب را در این متغیر ذخیزه میکنیم
         self.last_run = None  # مشخص میکند هر جاب اخرین بار کی اجرا شده
+        self.tags = set()
         self.scheduler = scheduler
 
     def __lt__(self, other):
         return self.next_run < other.next_run
 
-    # vaghti yek method ra property mikonid digar niaz be () baraye seda zadan function nadarid. darvaghe function hich parameter nadard.
+
     @property
     def second(self):
         if self.interval != 1:
@@ -109,6 +130,13 @@ class Job:
         self.unit = "weeks"
         return self
 
+
+    def tag(self,*tags):
+        if not all(isinstance(tag,Hashable) for tag in tags):
+            TypeError("Tags must be hashable")
+        self.tags.update(tags)
+        return self
+
     def do(self, job_func, *wargs, **kwargs):
         self.job_func = functools.partial(job_func, *wargs, **kwargs)
         functools.update_wrapper(self.job_func, job_func)
@@ -119,7 +147,7 @@ class Job:
 
         self.scheduler.jobs.append(self)
         return self
-
+    
     @property
     def should_run(self):
         assert self.next_run is not None, "must run _schedule_next_run before"
@@ -142,8 +170,8 @@ class Job:
         self.next_run = datetime.datetime.now() + self.period
 
 
-default_scheduler = scheduler()
 
+default_scheduler = scheduler()
 
 def every(interval):
     return default_scheduler.every(interval=interval)
@@ -151,3 +179,15 @@ def every(interval):
 
 def run_pending():
     default_scheduler.run_pending()
+
+
+def get_jobs(tag=None):
+    return default_scheduler.get_jobs(tag)
+
+# job badi che taraikhi ast
+def get_next_run(tag=None):
+    return default_scheduler.get_next_run(tag)
+
+# ta job badi chand seconds moonde
+def idle_seconds():
+    return default_scheduler.idle_seconds
