@@ -20,6 +20,10 @@ class IntervalError(ScheduleError):
     pass
 
 
+class CancelJob():
+    """can be retruned from a job to unschedule itself"""
+
+
 class scheduler:
     """ this class is an executor """
 
@@ -58,7 +62,7 @@ class scheduler:
             return None
         return (self.next_run - datetime.datetime.now()).total_seconds()
 
-    def clear(self,tag:None):
+    def clear(self,tag=None):
         if tag is None:
             logger.debug("Deleteing all jobs")
             del self.jobs[:]
@@ -72,6 +76,14 @@ class scheduler:
             self._job_run(job)
             time.sleep(delay_seconds)
 
+    def cancel_job(self,job):
+        try:
+            logger.debug(f"canceling job {str(job)}")
+            self.jobs.remove(job)
+        except ValueError:
+            logger.debug("Cancelong failed")
+
+
 class Job:
     """ this class receives the jobs and determines the job type """
 
@@ -82,6 +94,7 @@ class Job:
         self.period = None  # مثال -> هر ۱۰ ثانیه
         self.next_run = None  # زمان بعدی اجرای جاب را در این متغیر ذخیزه میکنیم
         self.last_run = None  # مشخص میکند هر جاب اخرین بار کی اجرا شده
+        self.cancel_after = None #زمان یا تاریخی که میخوایم جاب بعد از ان انجام نشود
         self.tags = set()
         self.scheduler = scheduler
 
@@ -144,6 +157,37 @@ class Job:
         self.unit = "weeks"
         return self
 
+    def until(self,until_time):
+        if isinstance(until_time,datetime.datetime):
+            self.cancel_after = until_time
+        elif isinstance(until_time,datetime.timedelta):
+            self.cancel_after = datetime.datetime.now() + until_time
+        elif isinstance(until_time,datetime.time):
+            self.cancel_after = datetime.datetime.combine(datetime.datetime.now(),until_time)
+        elif isinstance(until_time,str):
+            cancel_after = self._decode_datetime_str(
+                until_time,
+                [
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y-%m-%d",
+                    "%H:%M:%S",
+                    "%H:%M",
+                ]
+                )
+            if cancel_after is None:
+                raise ScheduleValueError("Invalid string format for until")
+            if '-' not in until_time:
+                now = datetime.datetime.now()
+                cancel_after = cancel_after.replace(year=now.year,month=now.month,day=now.day)
+            self.cancel_after=cancel_after
+        else:
+            raise TypeError("until just take string/datetime.datetime/datetime.time/timedelta parameter")
+
+        if self.cancel_after < datetime.datetime.now():
+            raise ScheduleValueError("can not schedule to run until a time in the past")
+        
+        return self
 
     def tag(self,*tags):
         if not all(isinstance(tag,Hashable) for tag in tags):
@@ -168,10 +212,16 @@ class Job:
         return datetime.datetime.now() >= self.next_run
 
     def run(self):
+        if self._is_overdue(datetime.datetime.now()):
+            logger.debug(f"cancelling job {self}")
+            return CancelJob
         logger.debug(f"Running job {self}")
         ret = self.job_func()   
         self.last_run = datetime.datetime.now()
         self._schedule_next_run()
+        if self._is_overdue(self.next_run):
+            logger.debug(f"cancelling job {self}")
+            return CancelJob
         return ret
 
     def _schedule_next_run(self):
@@ -183,6 +233,16 @@ class Job:
         self.period = datetime.timedelta(**{self.unit: interval})
         self.next_run = datetime.datetime.now() + self.period
 
+    def _is_overdue(self,when):
+        return self.cancel_after is not None and when > self.cancel_after
+
+    def _decode_datetime_str(self,datetime_str,formats):
+        for f in formats:
+            try:
+                return datetime.datetime.strptime(datetime_str,f)          
+            except ValueError:
+                pass
+        return None
 
 default_scheduler = scheduler()
 
@@ -208,6 +268,9 @@ def clear(tag=None):
 
 def run_all(delay_seconds=None):
     return default_scheduler.run_all(delay_seconds)
+
+def cancel_job(job):
+    return default_scheduler.cancel_job(job)
 
 #decorator function
 def repeat(job,*args,**kwargs):

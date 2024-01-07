@@ -2,12 +2,12 @@ import schedule
 
 import time
 
-@schedule.repeat(schedule.every(5).seconds)
+# @schedule.repeat(schedule.every(5).seconds)
 def job():
     print("im working ....")
 
 
-#schedule.every(5).seconds.do(job).tag("amir")
+schedule.every(2).seconds.until('21:12').do(job)
 
 
 
