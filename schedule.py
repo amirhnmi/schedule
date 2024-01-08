@@ -2,6 +2,8 @@ import logging
 import functools
 import datetime
 import time
+import re
+import pytz
 from collections.abc import Hashable
 
 logger = logging.getLogger("schedule.log")
@@ -40,7 +42,9 @@ class scheduler:
             self._job_run(job)
 
     def _job_run(self, job):
-        job.run()
+        ret = job.run()
+        if isinstance(ret,CancelJob) or ret is CancelJob:
+            self.cancel_job(job)
 
     def get_jobs(self,tag=None):
         if tag is None: return self.jobs[:]
@@ -95,6 +99,10 @@ class Job:
         self.next_run = None  # زمان بعدی اجرای جاب را در این متغیر ذخیزه میکنیم
         self.last_run = None  # مشخص میکند هر جاب اخرین بار کی اجرا شده
         self.cancel_after = None #زمان یا تاریخی که میخوایم جاب بعد از ان انجام نشود
+        self.latest = None
+        self.start_day = None    
+        self.at_time = None
+        self.at_time_zone = None
         self.tags = set()
         self.scheduler = scheduler
 
@@ -156,6 +164,78 @@ class Job:
     def weeks(self):
         self.unit = "weeks"
         return self
+    
+    @property
+    def saturday(self):
+        if self.interval != 1:
+            raise IntervalError(
+                "scheduling .saturday() job is only allowed for weekly jobs." 
+            )
+        self.start_day = "saturday"
+        return self.weeks
+    
+    def to(self,latest):
+        self.latest = latest
+        return self
+
+    def at(self,time_str,tz=None):
+        if self.unit in ['days',"hours","minutes"] and not self.start_day:
+            raise ScheduleValueError("Invalid unit. valid unit are `days` `hours` `minutes`")
+        
+        if tz is not None:
+            if isinstance(tz,str):
+                self.at_time_zone = pytz.timezone(tz)
+            elif isinstance(tz,pytz.BaseTzInfo):
+                self.at_time_zone = tz
+            else:
+                raise ScheduleValueError("time zone must be string or pytz.timezone object")
+        
+        if not isinstance(time_str,str):
+            raise TypeError("at() should be pased a string")
+        
+        if self.unit == "days" or  self.start_day:
+            if not re.match(r"^[0-2]\d:[0-5]\d(:[0-5]\d)?$",time_str):
+                raise ScheduleValueError("Invalid time format for a dayly job.valid format is HH:MM(:SS)?")
+            
+        if self.unit == "hours":
+            if not re.match(r"^([0-2]\d)?:[0-5]\d$", time_str):
+                raise ScheduleValueError("Invalid time format for a hourly job.valid format is (HH)?:MM")
+
+        
+        if self.unit == "minutes":
+            if not re.match(r"^:[0-5]\d$", time_str):
+                raise ScheduleValueError("Invalid time format for a minutely.job valid format is :MM")
+
+        time_values = time_str.split(":")
+        if len(time_values) == 3:
+            hour,minutes,second = time_values
+        elif len(time_values) == 2 and self.unit == "minutes":
+            hour,minute = 0,0
+            _,second = time_values
+        elif len(time_values) == 2 and self.unit == "hours" and len(time_values[0]):
+            hour = 0
+            minute,second = time_values
+        else:
+            hour,minute = time_values
+            second = 0
+
+        if self.unit == "days" or self.start_day:
+            hour = int(hour)
+            if not (0 <= hour <= 23):
+                raise ScheduleValueError("Invalid number of hours.hour must be between 0 to 23")
+        elif self.unit == "hours":
+            hour = 0
+        elif self.unit == "minutes":
+            hour,minutes = 0,0
+
+        hour = int(hour)
+        minute = int(minute)
+        second = int(second)
+
+        self.at_time = datetime.time(hour,minute,second)
+        return self
+
+
 
     def until(self,until_time):
         if isinstance(until_time,datetime.datetime):
