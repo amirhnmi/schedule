@@ -4,6 +4,7 @@ import datetime
 import time
 import re
 import pytz
+import random
 from collections.abc import Hashable
 
 logger = logging.getLogger("schedule.log")
@@ -309,9 +310,50 @@ class Job:
             raise IntervalError(
                 "invalid unit, valid unit are :`seconds`-`minutes`-`hours`-`days`-`weeks`")
 
-        interval = self.interval
+        if self.latest is not None:
+            if not self.latest >= self.interval:
+                raise ScheduleError("latest is grather than interval")
+            interval = random.randint(self.interval,self.latest)
+        else:
+            interval = self.interval
+
         self.period = datetime.timedelta(**{self.unit: interval})
         self.next_run = datetime.datetime.now() + self.period
+
+        if self.start_day is not None:
+            if self.unit != "weeks":
+                raise ScheduleValueError("unit  should be weeks")
+            
+            weekdays = ("monday","tuesday","wednsday","thursday","friday","saturday","sunday")
+
+            if self.start_day not in weekdays:
+                raise ScheduleValueError("invalid start day.valid start day are".format(weekdays))
+            
+            weekday = weekdays.index(self.start_day)
+            days_ahead = weekday - self.next_run.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+
+            self.next_run += datetime.timedelta(days_ahead) - self.period
+
+            if self.at_time is not None:
+                if self.unit not in ("days","hours","minutes") and self.start_day is None:
+                    raise ScheduleValueError("invalid unit without specifying start day")
+                
+                kwargs = {"second":self.at_time.second, "microsecond":0}
+                if self.unit is "days" and self.start_day is not None:
+                    kwargs["hour"] = self.at_time.hour
+                if self.unit in ["days","hours"] and self.start_day is not None:
+                    kwargs["minute"] = self.at_time.minute
+                self.next_run = self.next_run.replace(**kwargs)
+
+                if self.at_time_zone is not None:
+                    self.next_run = self.at_time_zone.localize(self.next_run).astimezone().replace(tzinfo=None)
+
+            if self.start_day is not None and self.at_time is not None:
+                if (self.next_run - datetime.datetime.now()).days >= 7:
+                    self.next_run -= self.period
+
 
     def _is_overdue(self,when):
         return self.cancel_after is not None and when > self.cancel_after
