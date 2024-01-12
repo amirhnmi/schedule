@@ -110,6 +110,58 @@ class Job:
     def __lt__(self, other):
         return self.next_run < other.next_run
 
+    def __str__(self):
+        if hasattr(self.job_func, "__name__"):
+            job_func_name = self.job_func.__name__
+        else:
+            job_func_name = repr(self.job_func)
+        
+        return "Job(interval={}, unit={}, do={}, args={}, kwargs={})".format(
+            self.interval,
+            self.unit,
+            job_func_name,
+            "()" if self.job_func is None else self.job_func.args,
+            "{}" if self.job_func is None else self.job_func.keywords
+        )
+    
+    def __repr__(self):
+        def is_repr(j):
+            return not isinstance(j,Job)
+        
+        timestats = f"last_run: {self.last_run}, next_run: {self.next_run}"
+        if hasattr(self.job_func,"__name__"):
+            job_func_name = self.job_func.__name__
+        else:
+            job_func_name = repr(self.job_func)
+
+        if self.job_func is not None:
+            args = [repr(x) if is_repr(x) else str(x) for x in self.job_func.args]
+            kwargs = ["%s=%s" %(k,repr(v)) for k,v in self.job_func.keywords.items()]
+            call_repr = job_func_name + "(" + ", ".join(args + kwargs) + ")"
+        else:
+            call_repr = "[None]"
+
+        if self.at_time is not None:
+            return "Every %s %s at %s do %s %s" %(
+                self.interval,
+                self.unit[:-1] if self.interval == 1 else self.unit,
+                self.at_time,
+                call_repr,
+                timestats
+            ) 
+        else:
+            ftm = (
+                "Every %(interval)s"
+                + ("to %(latest)s" if self.latest is not None else "")
+                + "%(unit)s do %(call_repr)s %(timestats)s"
+            )
+            return ftm % dict(
+                interval = self.interval,
+                latest = self.latest,
+                unit = (self.unit[:-1] if self.interval == 1 else self.unit),
+                call_repr = call_repr,
+                timestats = timestats
+            )
 
     @property
     def second(self):
@@ -235,8 +287,6 @@ class Job:
 
         self.at_time = datetime.time(hour,minute,second)
         return self
-
-
 
     def until(self,until_time):
         if isinstance(until_time,datetime.datetime):
